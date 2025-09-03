@@ -32,3 +32,6 @@ target/
 
 # Node.js dependencies
 node_modules/
+
+# Results
+allure-results/
