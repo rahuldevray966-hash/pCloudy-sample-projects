@@ -31,7 +31,7 @@ target/
 *.vs/
 
 # Node.js dependencies
-node_modules/
+node_modules/ package-lock.json
 
 # Results
 allure-results/
