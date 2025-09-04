@@ -1,0 +1,25 @@
+{
+  "name": "wdio_typescript",
+  "version": "1.0.0",
+  "main": "wdio.conf.ts",
+  "scripts": {
+    "wdio": "wdio run ./wdio.conf.ts"
+  },
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@wdio/allure-reporter": "^9.19.2",
+    "@wdio/cli": "^9.19.2",
+    "@wdio/local-runner": "^9.19.2",
+    "@wdio/mocha-framework": "^9.19.2",
+    "appium-uiautomator2-driver": "^4.2.9",
+    "tsx": "^4.20.5"
+  },
+  "dependencies": {
+    "@types/form-data": "^2.2.1",
+    "axios": "^1.11.0",
+    "form-data": "^4.0.4"
+  }
+}

@@ -1,0 +1,27 @@
+{
+	"capabilities" : {
+		 "pcloudy:options": {	
+			"pCloudy_Username": "Enter Email",
+			"pCloudy_ApiKey": "Enter API Key",
+			"pCloudy_DurationInMinutes": 10,
+			"pCloudy_DeviceFullName": "GOOGLE_Pixel3XL_Android_12.0.0_a9397",
+			"pCloudy_ApplicationName": "",
+			"appiumVersion": "1.22.0"
+		},
+			"platformName": "Android",
+		    "appium:automationName": "uiautomator2",
+			"appium:newCommandTimeout": 600,
+			"appium:launchTimeout": 90000,
+			"appium:appPackage": "com.pcloudy.appiumdemo",
+			"appium:appActivity": "com.ba.mobile.LaunchActivity",
+			"appium:project": "test_project",
+			"appium:tag": "test_tag",
+			"appium:name": "",
+			"appium:build": ""
+	},
+	"hostname": "ind-west.pcloudy.com",
+	"AppPath" : "/path/for/Application",
+	"uploadApp" : true,
+	"dynamicBuild": true,
+	"dynamicName": true
+}

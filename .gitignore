@@ -1,6 +1,7 @@
 # Compiled class file
 *.class
 *.classpath
+
 # Log file
 *.log
 
@@ -21,7 +22,6 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 
-
 # maven
 target/
 *.dll
@@ -29,3 +29,9 @@ target/
 /.metadata/
 
 *.vs/
+
+# Node.js dependencies
+node_modules/ package-lock.json
+
+# Results
+allure-results/
