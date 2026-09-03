@@ -8,8 +8,10 @@ on:
     branches:
       - master
 
+
 permissions:
   contents: read
+
 
 jobs:
 
@@ -18,6 +20,7 @@ jobs:
     name: Firebase IPA -> pCloudy -> Appium iPhone 12 Pro Max
 
     runs-on: ubuntu-latest
+
 
     steps:
 
@@ -39,6 +42,7 @@ jobs:
         uses: actions/setup-python@v6
 
         with:
+
           python-version: "3.12"
 
 
@@ -56,22 +60,13 @@ jobs:
 
           python -m pip install --upgrade pip
 
-          if [ -f Python/iOS-Appium/requirements.txt ]; then
-
-            pip install -r Python/iOS-Appium/requirements.txt
-
-          else
-
-            pip install \
-              Appium-Python-Client \
-              selenium \
-              pytest \
-              pytest-html
-
-          fi
+          pip install \
+            -r Python/iOS-Appium/requirements.txt
 
           echo "=========================================="
+
           echo "Python dependencies installed"
+
           echo "=========================================="
 
           pip list
@@ -86,6 +81,7 @@ jobs:
         uses: google-github-actions/auth@v3
 
         with:
+
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
 
@@ -104,10 +100,14 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
+
           echo "Getting Firebase access token"
+
           echo "=========================================="
 
+
           ACCESS_TOKEN="$(gcloud auth print-access-token)"
+
 
           if [ -z "$ACCESS_TOKEN" ]; then
 
@@ -117,15 +117,18 @@ jobs:
 
           fi
 
+
           echo "::add-mask::$ACCESS_TOKEN"
 
+
           echo "access_token=$ACCESS_TOKEN" >> "$GITHUB_OUTPUT"
+
 
           echo "Firebase authentication successful"
 
 
       # ==================================================
-      # 6. Get latest existing Firebase iOS release
+      # 6. Get latest Firebase iOS release
       # ==================================================
 
       - name: Get latest Firebase iOS release
@@ -142,18 +145,35 @@ jobs:
 
           ACCESS_TOKEN: ${{ steps.firebase-token.outputs.access_token }}
 
+
         run: |
 
           set -euo pipefail
 
+
           echo "=========================================="
+
           echo "Getting latest Firebase iOS release"
+
           echo "=========================================="
 
 
-          PROJECT_NUMBER="$(printf '%s' "$FIREBASE_PROJECT_NUMBER" | tr -d '[:space:]')"
+          PROJECT_NUMBER="$(
 
-          APP_ID="$(printf '%s' "$FIREBASE_APP_ID" | tr -d '[:space:]')"
+            printf '%s' "$FIREBASE_PROJECT_NUMBER" |
+
+            tr -d '[:space:]'
+
+          )"
+
+
+          APP_ID="$(
+
+            printf '%s' "$FIREBASE_APP_ID" |
+
+            tr -d '[:space:]'
+
+          )"
 
 
           # ------------------------------------------
@@ -195,9 +215,6 @@ jobs:
 
             echo "ERROR: FIREBASE_APP_ID does not look like an iOS App ID"
 
-            echo "Expected format:"
-            echo "123456789012:ios:xxxxxxxxxxxxxxxx"
-
             exit 1
 
           fi
@@ -227,11 +244,11 @@ jobs:
 
 
           # ------------------------------------------
-          # Firebase API
+          # Firebase App Distribution API
           #
           # IMPORTANT:
           # Keep App ID exactly as it is.
-          # Do NOT URL encode ':'.
+          # Do NOT manually URL encode ':'.
           # ------------------------------------------
 
           API_URL="https://firebaseappdistribution.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${APP_ID}/releases"
@@ -241,22 +258,29 @@ jobs:
 
           echo "Calling Firebase App Distribution API..."
 
-          echo "Project: ${PROJECT_NUMBER}"
-
-          echo "Firebase App ID configured"
-
 
           RESPONSE="$(
+
             curl \
+
               --silent \
+
               --show-error \
+
               --fail-with-body \
+
               --get \
+
               --url "$API_URL" \
+
               --header "Authorization: Bearer ${ACCESS_TOKEN}" \
+
               --header "Accept: application/json" \
+
               --data-urlencode "pageSize=1" \
+
               --data-urlencode "orderBy=createTime desc"
+
           )"
 
 
@@ -279,30 +303,51 @@ jobs:
 
 
           # ------------------------------------------
-          # Extract download URL
+          # Extract latest release
           # ------------------------------------------
 
           DOWNLOAD_URL="$(
+
             echo "$RESPONSE" |
+
             jq -r '.releases[0].binaryDownloadUri // empty'
+
           )"
 
 
           RELEASE_NAME="$(
+
             echo "$RESPONSE" |
+
             jq -r '.releases[0].name // empty'
+
           )"
 
 
           DISPLAY_VERSION="$(
+
             echo "$RESPONSE" |
+
             jq -r '.releases[0].displayVersion // empty'
+
           )"
 
 
           BUILD_VERSION="$(
+
             echo "$RESPONSE" |
+
             jq -r '.releases[0].buildVersion // empty'
+
+          )"
+
+
+          CREATE_TIME="$(
+
+            echo "$RESPONSE" |
+
+            jq -r '.releases[0].createTime // empty'
+
           )"
 
 
@@ -330,28 +375,25 @@ jobs:
           echo "=========================================="
 
 
-          echo "Release:"
-          echo "$RELEASE_NAME"
+          echo "Release       : $RELEASE_NAME"
 
+          echo "Version       : $DISPLAY_VERSION"
 
-          echo "Version:"
-          echo "$DISPLAY_VERSION"
+          echo "Build         : $BUILD_VERSION"
 
+          echo "Created       : $CREATE_TIME"
 
-          echo "Build:"
-          echo "$BUILD_VERSION"
-
-
-          echo "Firebase IPA download URL found"
+          echo "IPA URL found : YES"
 
 
           echo "::add-mask::$DOWNLOAD_URL"
+
 
           echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
 
 
       # ==================================================
-      # 7. Download existing IPA from Firebase
+      # 7. Download latest Firebase IPA
       # ==================================================
 
       - name: Download latest Firebase IPA
@@ -362,12 +404,16 @@ jobs:
 
           DOWNLOAD_URL: ${{ steps.firebase-release.outputs.download_url }}
 
+
         run: |
 
           set -euo pipefail
 
+
           echo "=========================================="
+
           echo "Downloading existing Firebase IPA"
+
           echo "=========================================="
 
 
@@ -381,13 +427,21 @@ jobs:
 
 
           curl \
+
             --fail-with-body \
+
             --location \
+
             --silent \
+
             --show-error \
+
             --retry 3 \
+
             --retry-delay 2 \
+
             "$DOWNLOAD_URL" \
+
             --output firebase-ios-app.ipa
 
 
@@ -401,6 +455,7 @@ jobs:
 
 
           echo "Firebase IPA downloaded successfully"
+
 
           ls -lh firebase-ios-app.ipa
 
@@ -416,6 +471,7 @@ jobs:
         run: |
 
           set -euo pipefail
+
 
           echo "=========================================="
 
@@ -460,9 +516,11 @@ jobs:
 
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
 
+
         run: |
 
           set -euo pipefail
+
 
           echo "=========================================="
 
@@ -490,12 +548,19 @@ jobs:
 
 
           RESPONSE="$(
+
             curl \
+
               --silent \
+
               --show-error \
+
               --fail-with-body \
+
               -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
+
               "https://device.pcloudy.com/api/access"
+
           )"
 
 
@@ -503,8 +568,11 @@ jobs:
 
 
           TOKEN="$(
+
             echo "$RESPONSE" |
+
             jq -r '.result.token // empty'
+
           )"
 
 
@@ -542,9 +610,11 @@ jobs:
 
           PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
 
+
         run: |
 
           set -euo pipefail
+
 
           echo "=========================================="
 
@@ -563,14 +633,23 @@ jobs:
 
 
           RESPONSE="$(
+
             curl \
+
               --silent \
+
               --show-error \
+
               --fail-with-body \
+
               --request POST \
+
               --header "Content-Type: application/json" \
+
               --data "{\"token\":\"${PCLOUDY_TOKEN}\",\"duration\":15,\"platform\":\"iOS\",\"available_now\":true}" \
+
               "https://device.pcloudy.com/api/devices"
+
           )"
 
 
@@ -587,8 +666,11 @@ jobs:
 
 
           jq -r '
+
             .result.models[] |
+
             "\(.display_name) | iOS \(.version) | available=\(.available) | full_name=\(.full_name)"
+
           ' pcloudy-devices.json
 
 
@@ -626,14 +708,29 @@ jobs:
 
 
           FOUND="$(
-            jq -r --arg DEVICE "$TARGET_DEVICE" '
-              .result.models[] |
-              select(
-                .full_name == $DEVICE and
-                .available == true
-              ) |
-              .full_name
-            ' pcloudy-devices.json
+
+            jq -r \
+
+              --arg DEVICE "$TARGET_DEVICE" \
+
+              '
+
+                .result.models[] |
+
+                select(
+
+                  .full_name == $DEVICE and
+
+                  .available == true
+
+                ) |
+
+                .full_name
+
+              ' \
+
+              pcloudy-devices.json
+
           )"
 
 
@@ -649,9 +746,13 @@ jobs:
             echo "Available devices:"
 
             jq -r '
+
               .result.models[] |
+
               select(.available == true) |
+
               "\(.display_name) | iOS \(.version) | \(.full_name)"
+
             ' pcloudy-devices.json
 
 
@@ -688,9 +789,11 @@ jobs:
 
           PCLOUDY_TOKEN: ${{ steps.pcloudy-auth.outputs.token }}
 
+
         run: |
 
           set -euo pipefail
+
 
           echo "=========================================="
 
@@ -700,17 +803,29 @@ jobs:
 
 
           HTTP_CODE="$(
+
             curl \
+
               --silent \
+
               --show-error \
+
               --output pcloudy-upload.json \
+
               --write-out "%{http_code}" \
+
               --request POST \
+
               --form "file=@firebase-ios-app.ipa" \
+
               --form "source_type=raw" \
+
               --form "token=${PCLOUDY_TOKEN}" \
+
               --form "filter=all" \
+
               "https://device.pcloudy.com/api/upload_file"
+
           )"
 
 
@@ -751,9 +866,11 @@ jobs:
 
           IOS_BUNDLE_ID: com.pcloudy.TestmunkDemo
 
+
         run: |
 
           set -euo pipefail
+
 
           echo "=========================================="
 
@@ -773,9 +890,13 @@ jobs:
 
 
           pytest \
+
             Python/iOS-Appium/test_ios_lifecycle.py \
+
             -v \
+
             --tb=short \
+
             --junitxml=ios-appium-results.xml
 
 
@@ -803,10 +924,16 @@ jobs:
           name: ios-appium-test-results-iphone12promax
 
           path: |
+
             ios-appium-results.xml
+
             firebase-release.json
+
             pcloudy-auth.json
+
             pcloudy-devices.json
+
             pcloudy-upload.json
+
 
           if-no-files-found: warn
