@@ -1,6 +1,10 @@
 name: iOS Firebase to pCloudy
 
 on:
+  push:
+    branches:
+      - master
+
   workflow_dispatch:
 
 jobs:
@@ -35,7 +39,6 @@ jobs:
       - name: Get Firebase access token
         run: |
           gcloud auth print-access-token > firebase-token.txt
-
           echo "Firebase authentication successful"
 
       # -----------------------------
@@ -79,9 +82,6 @@ jobs:
       # -----------------------------
 
       - name: Get available iOS devices
-        env:
-          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
-          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
         run: |
           TOKEN=$(python3 - <<'PY'
           import json
