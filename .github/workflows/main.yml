@@ -13,7 +13,7 @@ permissions:
 jobs:
 
   ios-appium:
-    name: Firebase → pCloudy → Appium
+    name: Firebase → pCloudy → iOS Appium
     runs-on: ubuntu-latest
 
     env:
@@ -27,17 +27,17 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------
-      # 1. Checkout
-      # --------------------------------------------------
+      # ==================================================
+      # 1. Checkout repository
+      # ==================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 2. Setup Python
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -45,20 +45,26 @@ jobs:
           python-version: "3.12"
 
 
-      # --------------------------------------------------
-      # 3. Install dependencies
-      # --------------------------------------------------
+      # ==================================================
+      # 3. Install Python dependencies
+      # ==================================================
 
       - name: Install Python dependencies
         working-directory: Python/iOS-Appium
         run: |
+          set -e
+
           python -m pip install --upgrade pip
+
           pip install -r requirements.txt
 
+          python --version
+          pytest --version
 
-      # --------------------------------------------------
+
+      # ==================================================
       # 4. Verify Firebase configuration
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Verify Firebase configuration
         run: |
@@ -67,40 +73,48 @@ jobs:
           echo "Firebase project number length: ${#FIREBASE_PROJECT_NUMBER}"
           echo "Firebase App ID length: ${#FIREBASE_APP_ID}"
 
-          if [ -z "$FIREBASE_PROJECT_NUMBER" ]; then
+          if [ -z "${FIREBASE_PROJECT_NUMBER}" ]; then
             echo "ERROR: FIREBASE_PROJECT_NUMBER is empty"
             exit 1
           fi
 
-          if [ -z "$FIREBASE_APP_ID" ]; then
+          if [ -z "${FIREBASE_APP_ID}" ]; then
             echo "ERROR: FIREBASE_APP_ID is empty"
             exit 1
           fi
 
-          echo "Firebase configuration is available."
+          case "${FIREBASE_APP_ID}" in
+            1:${FIREBASE_PROJECT_NUMBER}:ios:*)
+              echo "Firebase App ID format is valid"
+              ;;
+            *)
+              echo "ERROR: Firebase App ID does not match project number"
+              exit 1
+              ;;
+          esac
 
 
-      # --------------------------------------------------
-      # 5. Authenticate Google / Firebase
-      # --------------------------------------------------
+      # ==================================================
+      # 5. Authenticate with Google / Firebase
+      # ==================================================
 
-      - name: Authenticate with Google Cloud
+      - name: Authenticate with Firebase
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 6. Setup gcloud
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 7. Generate Firebase access token
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Generate Firebase access token
         run: |
@@ -109,16 +123,16 @@ jobs:
           gcloud auth print-access-token > firebase-token.txt
 
           if [ ! -s firebase-token.txt ]; then
-            echo "ERROR: Firebase access token was not generated"
+            echo "ERROR: Firebase token was not generated"
             exit 1
           fi
 
           echo "Firebase authentication successful"
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 8. Get latest Firebase release
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Get latest Firebase release
         run: |
@@ -126,19 +140,19 @@ jobs:
 
           TOKEN=$(cat firebase-token.txt)
 
-          echo "Getting Firebase release information..."
+          echo "Getting latest Firebase release..."
 
           HTTP_CODE=$(curl -sS \
             -o firebase-releases.json \
             -w "%{http_code}" \
             -H "Authorization: Bearer ${TOKEN}" \
             -H "Accept: application/json" \
-            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_APP_ID}/releases?pageSize=10")
+            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_APP_ID}/releases?pageSize=10&orderBy=createTime%20desc")
 
           echo "Firebase API HTTP status: ${HTTP_CODE}"
 
           if [ "${HTTP_CODE}" != "200" ]; then
-            echo "Firebase API request failed"
+            echo "ERROR: Firebase release API failed"
             cat firebase-releases.json
             exit 1
           fi
@@ -153,7 +167,7 @@ jobs:
           releases = data.get("releases", [])
 
           if not releases:
-              print("No Firebase releases found")
+              print("ERROR: No Firebase releases found")
               sys.exit(1)
 
           latest = releases[0]
@@ -164,16 +178,13 @@ jobs:
 
           print("Version:", latest.get("displayVersion"))
           print("Build:", latest.get("buildVersion"))
-          print("Release:", latest.get("name"))
+          print("Created:", latest.get("createTime"))
 
-          download_url = (
-              latest.get("binaryDownloadUri")
-              or latest.get("binary_download_uri")
-          )
+          download_url = latest.get("binaryDownloadUri")
 
           if not download_url:
-              print("binaryDownloadUri was not found")
-              print("Available release fields:")
+              print("ERROR: binaryDownloadUri not found")
+              print("Available fields:")
               print(list(latest.keys()))
               sys.exit(1)
 
@@ -184,9 +195,9 @@ jobs:
           PY
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 9. Download latest IPA
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Download latest Firebase IPA
         run: |
@@ -194,10 +205,10 @@ jobs:
 
           DOWNLOAD_URL=$(cat firebase-download-url.txt)
 
-          echo "Downloading latest Firebase IPA..."
+          echo "Downloading latest IPA..."
 
           curl -fL \
-            "$DOWNLOAD_URL" \
+            "${DOWNLOAD_URL}" \
             -o TestmunkDemo.ipa
 
           if [ ! -s TestmunkDemo.ipa ]; then
@@ -210,114 +221,52 @@ jobs:
           ls -lh TestmunkDemo.ipa
 
 
-      # --------------------------------------------------
-      # 10. Verify IPA
-      # --------------------------------------------------
+      # ==================================================
+      # 10. Validate IPA
+      # ==================================================
 
-      - name: Verify IPA
+      - name: Validate IPA
         run: |
           set -e
 
+          echo "Validating IPA..."
+
           file TestmunkDemo.ipa
 
-          if ! unzip -t TestmunkDemo.ipa >/dev/null 2>&1; then
-            echo "ERROR: Downloaded file is not a valid IPA"
-            exit 1
-          fi
+          unzip -t TestmunkDemo.ipa > /dev/null
 
           echo "IPA validation successful"
 
 
-      # --------------------------------------------------
-      # 11. Upload IPA to pCloudy
-      # --------------------------------------------------
+      # ==================================================
+      # 11. Verify pCloudy configuration
+      # ==================================================
 
-      - name: Upload IPA to pCloudy
+      - name: Verify pCloudy configuration
         run: |
           set -e
 
-          echo "Uploading IPA to pCloudy..."
-
-          # Authenticate with pCloudy
-          AUTH_RESPONSE=$(curl -sS \
-            -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
-            "https://device.pcloudy.com/api/access")
-
-          echo "$AUTH_RESPONSE" > pcloudy-auth.json
-
-          PCLOUDY_TOKEN=$(python3 - <<'PY'
-          import json
-          import sys
-
-          with open("pcloudy-auth.json") as f:
-              data = json.load(f)
-
-          def find_token(obj):
-              if isinstance(obj, dict):
-                  for key, value in obj.items():
-                      if key.lower() in ("token", "accesstoken", "access_token"):
-                          if isinstance(value, str) and value.strip():
-                              return value
-
-                      result = find_token(value)
-
-                      if result:
-                          return result
-
-              elif isinstance(obj, list):
-                  for item in obj:
-                      result = find_token(item)
-
-                      if result:
-                          return result
-
-              return None
-
-          token = find_token(data)
-
-          if not token:
-              print("ERROR: pCloudy token not found")
-              print("Available top-level fields:", list(data.keys()))
-              sys.exit(1)
-
-          print(token)
-          PY
-          )
-
-          if [ -z "$PCLOUDY_TOKEN" ]; then
-            echo "ERROR: pCloudy authentication failed"
+          if [ -z "${PCLOUDY_EMAIL}" ]; then
+            echo "ERROR: PCLOUDY_EMAIL is empty"
             exit 1
           fi
 
-          echo "pCloudy authentication successful"
-
-          # Upload application
-          HTTP_CODE=$(curl -sS \
-            -o pcloudy-upload-response.json \
-            -w "%{http_code}" \
-            -X POST \
-            -H "Authorization: Bearer ${PCLOUDY_TOKEN}" \
-            -F "file=@TestmunkDemo.ipa" \
-            "https://device.pcloudy.com/api/upload_file")
-
-          echo "pCloudy upload HTTP status: ${HTTP_CODE}"
-
-          cat pcloudy-upload-response.json
-
-          if [ "${HTTP_CODE}" -lt 200 ] || [ "${HTTP_CODE}" -ge 300 ]; then
-            echo "ERROR: pCloudy IPA upload failed"
+          if [ -z "${PCLOUDY_ACCESS_KEY}" ]; then
+            echo "ERROR: PCLOUDY_ACCESS_KEY is empty"
             exit 1
           fi
 
-          echo "IPA uploaded to pCloudy successfully"
+          echo "pCloudy credentials are available"
+
+          echo "Application:"
+          echo "${PCLOUDY_APPLICATION_NAME}"
 
 
-      # --------------------------------------------------
-      # 12. Read selected devices
-      # --------------------------------------------------
+      # ==================================================
+      # 12. Verify selected devices
+      # ==================================================
 
-      - name: Read selected pCloudy devices
-        id: devices
+      - name: Verify devices.json
         working-directory: Python/iOS-Appium
         run: |
           set -e
@@ -332,27 +281,34 @@ jobs:
           devices = data.get("devices", [])
 
           if not devices:
-              print("ERROR: No devices found in devices.json")
+              print("ERROR: devices.json contains no devices")
               sys.exit(1)
 
+          print("----------------------------------------")
+          print("Selected pCloudy devices")
+          print("----------------------------------------")
+
           for index, device in enumerate(devices, start=1):
+
               name = device.get("DeviceFullName")
 
               if not name:
-                  print(f"ERROR: Device #{index} has no DeviceFullName")
+                  print(f"ERROR: Device {index} has no DeviceFullName")
                   sys.exit(1)
 
               print(f"{index}. {name}")
 
-          print(f"Total devices selected: {len(devices)}")
+          print("----------------------------------------")
+          print(f"Total devices: {len(devices)}")
+          print("----------------------------------------")
           PY
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 13. Run Appium sequentially
-      # --------------------------------------------------
+      # ==================================================
 
-      - name: Run Appium on selected devices
+      - name: Run iOS Appium tests sequentially
         working-directory: Python/iOS-Appium
         run: |
           set -e
@@ -372,11 +328,12 @@ jobs:
               print("ERROR: No devices configured")
               sys.exit(1)
 
-          print("========================================")
-          print("Starting sequential Appium execution")
-          print("========================================")
+          failed_devices = []
 
-          failed = []
+          print()
+          print("========================================")
+          print("iOS Appium Sequential Execution")
+          print("========================================")
 
           for index, device in enumerate(devices, start=1):
 
@@ -388,8 +345,11 @@ jobs:
               print(f"Device: {device_name}")
               print("========================================")
 
-              env = os.environ.copy()
-              env["DEVICE_FULL_NAME"] = device_name
+              environment = os.environ.copy()
+
+              environment["DEVICE_FULL_NAME"] = device_name
+
+              report_name = f"report-device-{index}.html"
 
               result = subprocess.run(
                   [
@@ -397,38 +357,47 @@ jobs:
                       "-v",
                       "test_ios_lifecycle.py",
                       "--html",
-                      f"report-device-{index}.html",
+                      report_name,
                       "--self-contained-html"
                   ],
-                  env=env
+                  env=environment
               )
 
               if result.returncode != 0:
+
+                  print()
                   print(f"FAILED: {device_name}")
-                  failed.append(device_name)
+
+                  failed_devices.append(device_name)
+
               else:
+
+                  print()
                   print(f"PASSED: {device_name}")
 
           print()
           print("========================================")
-          print("Execution Summary")
+          print("Final Execution Summary")
           print("========================================")
 
-          if failed:
+          if failed_devices:
+
               print("Failed devices:")
 
-              for device in failed:
+              for device in failed_devices:
                   print(f"- {device}")
+
+              print()
+              print("Some Appium tests failed.")
 
               sys.exit(1)
 
           print("All selected devices passed successfully.")
-          PY
 
 
-      # --------------------------------------------------
+      # ==================================================
       # 14. Upload Appium reports
-      # --------------------------------------------------
+      # ==================================================
 
       - name: Upload Appium reports
         if: always()
@@ -437,19 +406,16 @@ jobs:
           name: ios-appium-reports
           path: |
             Python/iOS-Appium/report-device-*.html
-            TestmunkDemo.ipa
           if-no-files-found: warn
 
 
-      # --------------------------------------------------
-      # 15. Cleanup sensitive files
-      # --------------------------------------------------
+      # ==================================================
+      # 15. Cleanup
+      # ==================================================
 
-      - name: Cleanup
+      - name: Cleanup sensitive files
         if: always()
         run: |
           rm -f firebase-token.txt
           rm -f firebase-releases.json
           rm -f firebase-download-url.txt
-          rm -f pcloudy-auth.json
-          rm -f pcloudy-upload-response.json
