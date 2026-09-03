@@ -1,0 +1,122 @@
+name: iOS Firebase to pCloudy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios-pcloudy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r Python/iOS-Appium/requirements.txt
+
+      # -----------------------------
+      # Firebase Authentication
+      # -----------------------------
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Get Firebase access token
+        run: |
+          gcloud auth print-access-token > firebase-token.txt
+
+          echo "Firebase authentication successful"
+
+      # -----------------------------
+      # Firebase Release List
+      # -----------------------------
+
+      - name: Get latest Firebase iOS release
+        env:
+          FIREBASE_PROJECT_NUMBER: ${{ secrets.FIREBASE_PROJECT_NUMBER }}
+          FIREBASE_IOS_APP_ID: ${{ secrets.FIREBASE_IOS_APP_ID }}
+        run: |
+          TOKEN=$(cat firebase-token.txt)
+
+          curl -s \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_IOS_APP_ID}/releases" \
+            > firebase-releases.json
+
+          echo "Firebase releases:"
+          cat firebase-releases.json
+
+      # -----------------------------
+      # pCloudy Authentication
+      # -----------------------------
+
+      - name: Authenticate with pCloudy
+        env:
+          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
+          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
+        run: |
+          curl -s \
+            -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
+            "https://device.pcloudy.com/api/access" \
+            > pcloudy-auth.json
+
+          echo "pCloudy authentication response:"
+          cat pcloudy-auth.json
+
+      # -----------------------------
+      # Get pCloudy iOS devices
+      # -----------------------------
+
+      - name: Get available iOS devices
+        env:
+          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
+          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
+        run: |
+          TOKEN=$(python3 - <<'PY'
+          import json
+
+          with open("pcloudy-auth.json") as f:
+              data = json.load(f)
+
+          print(data.get("token", ""))
+          PY
+          )
+
+          if [ -z "$TOKEN" ]; then
+            echo "pCloudy token was not found"
+            exit 1
+          fi
+
+          curl -s \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"token\":\"${TOKEN}\",\"duration\":15,\"platform\":\"iOS\",\"available_now\":true}" \
+            "https://device.pcloudy.com/api/devices" \
+            > pcloudy-devices.json
+
+          echo "Available iOS devices:"
+          cat pcloudy-devices.json
+
+      # -----------------------------
+      # Upload debugging artifacts
+      # -----------------------------
+
+      - name: Upload Firebase and pCloudy data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-discovery-results
+          path: |
+            firebase-releases.json
+            pcloudy-auth.json
+            pcloudy-devices.json
