@@ -1,5 +1,4 @@
 import os
-import pytest
 
 from appium import webdriver
 from appium.options.ios import XCUITestOptions
@@ -10,21 +9,17 @@ PCLOUDY_ACCESS_KEY = os.environ["PCLOUDY_ACCESS_KEY"]
 PCLOUDY_DEVICE = os.environ["PCLOUDY_DEVICE"]
 PCLOUDY_APPLICATION_NAME = os.environ["PCLOUDY_APPLICATION_NAME"]
 
-BUNDLE_ID = os.getenv(
+IOS_BUNDLE_ID = os.getenv(
     "IOS_BUNDLE_ID",
     "com.pcloudy.TestmunkDemo"
 )
 
-PERFORMANCE_DATA = (
-    os.getenv("PCLOUDY_ENABLE_PERFORMANCE_DATA", "true").lower()
-    == "true"
-)
 
+def test_ios_app_launch():
 
-@pytest.fixture
-def driver():
     options = XCUITestOptions()
 
+    # pCloudy authentication
     options.set_capability(
         "pCloudy_Username",
         PCLOUDY_EMAIL
@@ -35,26 +30,25 @@ def driver():
         PCLOUDY_ACCESS_KEY
     )
 
+    # Application uploaded to pCloudy
     options.set_capability(
         "pCloudy_ApplicationName",
         PCLOUDY_APPLICATION_NAME
     )
 
+    # Exact pCloudy device
     options.set_capability(
         "pCloudy_DeviceFullName",
         PCLOUDY_DEVICE
     )
 
+    # Session duration
     options.set_capability(
         "pCloudy_DurationInMinutes",
         15
     )
 
-    options.set_capability(
-        "pCloudy_EnablePerformanceData",
-        PERFORMANCE_DATA
-    )
-
+    # iOS
     options.set_capability(
         "platformName",
         "iOS"
@@ -65,25 +59,39 @@ def driver():
         "XCUITest"
     )
 
+    # Application bundle ID
     options.set_capability(
         "bundleId",
-        BUNDLE_ID
+        IOS_BUNDLE_ID
     )
 
-    driver = webdriver.Remote(
-        "https://device.pcloudy.com/appiumcloud/wd/hub",
-        options=options
-    )
+    driver = None
 
-    yield driver
+    try:
 
-    driver.quit()
+        print("----------------------------------------")
+        print("Starting iOS Appium session")
+        print(f"Device      : {PCLOUDY_DEVICE}")
+        print(f"Application : {PCLOUDY_APPLICATION_NAME}")
+        print(f"Bundle ID   : {IOS_BUNDLE_ID}")
+        print("----------------------------------------")
 
+        driver = webdriver.Remote(
+            "https://device.pcloudy.com/appiumcloud/wd/hub",
+            options=options
+        )
 
-def test_ios_app_launch(driver):
-    print("iOS application launched successfully")
+        print("Appium session started successfully")
+        print(f"Session ID: {driver.session_id}")
 
-    # Basic validation
-    assert driver.session_id is not None
+        assert driver.session_id is not None
 
-    print("Session ID:", driver.session_id)
+        print("iOS application launched successfully")
+
+    finally:
+
+        if driver:
+
+            driver.quit()
+
+            print("Appium session closed")
