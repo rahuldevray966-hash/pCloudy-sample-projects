@@ -1,4 +1,4 @@
-name: iOS Firebase to pCloudy
+name: iOS Firebase to pCloudy Appium
 
 on:
   push:
@@ -8,115 +8,308 @@ on:
   workflow_dispatch:
 
 jobs:
-  ios-pcloudy:
+  ios-appium:
     runs-on: ubuntu-latest
 
     steps:
+
+      # ============================================================
+      # CHECKOUT
+      # ============================================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
+
       - name: Install dependencies
         run: |
+          python -m pip install --upgrade pip
           pip install -r Python/iOS-Appium/requirements.txt
 
-      # -----------------------------
-      # Firebase Authentication
-      # -----------------------------
+
+      # ============================================================
+      # FIREBASE AUTHENTICATION
+      # ============================================================
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
+
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v3
+
 
       - name: Get Firebase access token
         run: |
           gcloud auth print-access-token > firebase-token.txt
           echo "Firebase authentication successful"
 
-      # -----------------------------
-      # Firebase Release List
-      # -----------------------------
+
+      # ============================================================
+      # GET LATEST FIREBASE RELEASE
+      # ============================================================
 
       - name: Get latest Firebase iOS release
         env:
           FIREBASE_PROJECT_NUMBER: ${{ secrets.FIREBASE_PROJECT_NUMBER }}
           FIREBASE_IOS_APP_ID: ${{ secrets.FIREBASE_IOS_APP_ID }}
+
         run: |
+
           TOKEN=$(cat firebase-token.txt)
 
-          curl -s \
+          curl -fLsS \
             -H "Authorization: Bearer ${TOKEN}" \
-            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_IOS_APP_ID}/releases" \
+            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_IOS_APP_ID}/releases?pageSize=10" \
             > firebase-releases.json
 
-          echo "Firebase releases:"
-          cat firebase-releases.json
+          python3 - <<'PY'
+          import json
 
-      # -----------------------------
-      # pCloudy Authentication
-      # -----------------------------
+          with open("firebase-releases.json") as f:
+              data = json.load(f)
+
+          releases = data.get("releases", [])
+
+          if not releases:
+              raise SystemExit("No Firebase releases found")
+
+          latest = releases[0]
+
+          print("Latest Firebase release:")
+          print("Version:", latest.get("displayVersion"))
+          print("Build:", latest.get("buildVersion"))
+
+          download_url = (
+              latest.get("binaryDownloadUri")
+              or latest.get("binary_download_uri")
+          )
+
+          if not download_url:
+              raise SystemExit(
+                  "Firebase binary download URL not found"
+              )
+
+          with open("firebase-download-url.txt", "w") as f:
+              f.write(download_url)
+
+          print("Firebase IPA download URL found")
+          PY
+
+
+      # ============================================================
+      # DOWNLOAD IPA
+      # ============================================================
+
+      - name: Download latest iOS IPA
+        run: |
+
+          DOWNLOAD_URL=$(cat firebase-download-url.txt)
+
+          curl -fL \
+            "${DOWNLOAD_URL}" \
+            -o firebase-ios-app.ipa
+
+          test -s firebase-ios-app.ipa
+
+          echo "IPA downloaded successfully"
+
+          ls -lh firebase-ios-app.ipa
+
+
+      # ============================================================
+      # PCLOUDY AUTHENTICATION
+      # ============================================================
 
       - name: Authenticate with pCloudy
         env:
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
+
         run: |
-          curl -s \
+
+          curl -fLsS \
             -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
             "https://device.pcloudy.com/api/access" \
             > pcloudy-auth.json
 
-          echo "pCloudy authentication response:"
-          cat pcloudy-auth.json
-
-      # -----------------------------
-      # Get pCloudy iOS devices
-      # -----------------------------
-
-      - name: Get available iOS devices
-        run: |
-          TOKEN=$(python3 - <<'PY'
+          python3 - <<'PY'
           import json
 
           with open("pcloudy-auth.json") as f:
               data = json.load(f)
 
-          print(data.get("token", ""))
+          print("pCloudy response received")
+          print("Response keys:", list(data.keys()))
+
+          def find_token(obj):
+
+              if isinstance(obj, dict):
+
+                  for key, value in obj.items():
+
+                      if key.lower() in (
+                          "token",
+                          "accesstoken",
+                          "access_token"
+                      ):
+
+                          if value:
+                              return str(value)
+
+                      result = find_token(value)
+
+                      if result:
+                          return result
+
+              elif isinstance(obj, list):
+
+                  for value in obj:
+
+                      result = find_token(value)
+
+                      if result:
+                          return result
+
+              return None
+
+          token = find_token(data)
+
+          if not token:
+              raise SystemExit(
+                  "pCloudy authentication token was not found"
+              )
+
+          with open("pcloudy-token.txt", "w") as f:
+              f.write(token)
+
+          print("pCloudy authentication successful")
           PY
-          )
 
-          if [ -z "$TOKEN" ]; then
-            echo "pCloudy token was not found"
-            exit 1
-          fi
 
-          curl -s \
+      # ============================================================
+      # UPLOAD IPA TO PCLOUDY
+      # ============================================================
+
+      - name: Upload IPA to pCloudy
+        run: |
+
+          TOKEN=$(cat pcloudy-token.txt)
+
+          curl -fLsS \
             -X POST \
-            -H "Content-Type: application/json" \
-            -d "{\"token\":\"${TOKEN}\",\"duration\":15,\"platform\":\"iOS\",\"available_now\":true}" \
-            "https://device.pcloudy.com/api/devices" \
-            > pcloudy-devices.json
+            -H "Authorization: Bearer ${TOKEN}" \
+            -F "file=@firebase-ios-app.ipa" \
+            "https://device.pcloudy.com/api/upload_file" \
+            > pcloudy-upload.json
 
-          echo "Available iOS devices:"
-          cat pcloudy-devices.json
+          echo "pCloudy upload completed"
 
-      # -----------------------------
-      # Upload debugging artifacts
-      # -----------------------------
+          cat pcloudy-upload.json
 
-      - name: Upload Firebase and pCloudy data
+
+      # ============================================================
+      # READ SELECTED DEVICES
+      # ============================================================
+
+      - name: Read selected devices
+        run: |
+
+          python3 - <<'PY' > selected-devices.txt
+          import json
+
+          path = "Python/iOS-Appium/devices.json"
+
+          with open(path) as f:
+              data = json.load(f)
+
+          devices = data.get("devices", [])
+
+          if not devices:
+              raise SystemExit(
+                  "No devices found in devices.json"
+              )
+
+          for device in devices:
+
+              name = device.get("DeviceFullName")
+
+              if not name:
+                  raise SystemExit(
+                      "DeviceFullName is missing"
+                  )
+
+              print(name)
+
+          print(
+              f"Selected devices: {len(devices)}",
+              file=__import__("sys").stderr
+          )
+          PY
+
+          cat selected-devices.txt
+
+
+      # ============================================================
+      # RUN APPIUM TESTS SEQUENTIALLY
+      # ============================================================
+
+      - name: Run Appium tests
+        env:
+          PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
+          PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
+
+          PCLOUDY_APPLICATION_NAME: firebase-ios-app.ipa
+
+          IOS_BUNDLE_ID: com.pcloudy.TestmunkDemo
+
+        run: |
+
+          set -e
+
+          while IFS= read -r DEVICE_NAME
+          do
+
+            echo ""
+            echo "=========================================="
+            echo "Running Appium test"
+            echo "Device: ${DEVICE_NAME}"
+            echo "=========================================="
+
+            export PCLOUDY_DEVICE="${DEVICE_NAME}"
+
+            pytest \
+              Python/iOS-Appium/test_ios_lifecycle.py \
+              -v \
+              --html="ios-result.html" \
+              --self-contained-html
+
+          done < selected-devices.txt
+
+
+      # ============================================================
+      # UPLOAD TEST RESULTS
+      # ============================================================
+
+      - name: Upload Appium results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-discovery-results
+          name: ios-appium-results
           path: |
+            ios-result.html
             firebase-releases.json
-            pcloudy-auth.json
-            pcloudy-devices.json
+            firebase-ios-app.ipa
+            pcloudy-upload.json
