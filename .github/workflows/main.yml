@@ -1,29 +1,33 @@
 name: iOS Firebase to pCloudy Appium
 
 on:
+
   push:
     branches:
       - master
 
   workflow_dispatch:
 
+
 jobs:
+
   ios-appium:
+
     runs-on: ubuntu-latest
 
     steps:
 
-      # ============================================================
+      # ==========================================================
       # CHECKOUT
-      # ============================================================
+      # ==========================================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
 
 
-      # ============================================================
+      # ==========================================================
       # PYTHON
-      # ============================================================
+      # ==========================================================
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -31,15 +35,18 @@ jobs:
           python-version: "3.12"
 
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
+
           python -m pip install --upgrade pip
-          pip install -r Python/iOS-Appium/requirements.txt
+
+          pip install \
+            -r Python/iOS-Appium/requirements.txt
 
 
-      # ============================================================
+      # ==========================================================
       # FIREBASE AUTHENTICATION
-      # ============================================================
+      # ==========================================================
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -47,36 +54,62 @@ jobs:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
 
-      - name: Setup gcloud
+      - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v3
 
 
       - name: Get Firebase access token
         run: |
-          gcloud auth print-access-token > firebase-token.txt
+
+          gcloud auth print-access-token \
+            > firebase-token.txt
+
           echo "Firebase authentication successful"
 
 
-      # ============================================================
-      # GET LATEST FIREBASE RELEASE
-      # ============================================================
+      # ==========================================================
+      # GET FIREBASE RELEASE
+      # ==========================================================
 
       - name: Get latest Firebase iOS release
         env:
+
           FIREBASE_PROJECT_NUMBER: ${{ secrets.FIREBASE_PROJECT_NUMBER }}
+
           FIREBASE_IOS_APP_ID: ${{ secrets.FIREBASE_IOS_APP_ID }}
 
         run: |
 
+          set -e
+
           TOKEN=$(cat firebase-token.txt)
 
-          curl -fLsS \
+          echo "Getting Firebase release information..."
+
+          HTTP_CODE=$(curl -sS \
+            -o firebase-releases.json \
+            -w "%{http_code}" \
             -H "Authorization: Bearer ${TOKEN}" \
-            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_IOS_APP_ID}/releases?pageSize=10" \
-            > firebase-releases.json
+            -H "Accept: application/json" \
+            "https://firebaseappdistribution.googleapis.com/v1/projects/${FIREBASE_PROJECT_NUMBER}/apps/${FIREBASE_IOS_APP_ID}/releases?pageSize=10")
+
+          echo "Firebase API HTTP status: ${HTTP_CODE}"
+
+          if [ "${HTTP_CODE}" != "200" ]; then
+
+            echo "Firebase API request failed"
+
+            cat firebase-releases.json
+
+            exit 1
+
+          fi
+
 
           python3 - <<'PY'
+
           import json
+          import sys
 
           with open("firebase-releases.json") as f:
               data = json.load(f)
@@ -84,75 +117,155 @@ jobs:
           releases = data.get("releases", [])
 
           if not releases:
-              raise SystemExit("No Firebase releases found")
+
+              print("No Firebase releases found")
+
+              sys.exit(1)
+
 
           latest = releases[0]
 
-          print("Latest Firebase release:")
-          print("Version:", latest.get("displayVersion"))
-          print("Build:", latest.get("buildVersion"))
+          print("----------------------------------------")
+          print("Latest Firebase release")
+          print("----------------------------------------")
+
+          print(
+              "Version:",
+              latest.get("displayVersion")
+          )
+
+          print(
+              "Build:",
+              latest.get("buildVersion")
+          )
+
+          print(
+              "Release:",
+              latest.get("name")
+          )
+
 
           download_url = (
               latest.get("binaryDownloadUri")
               or latest.get("binary_download_uri")
           )
 
+
           if not download_url:
-              raise SystemExit(
-                  "Firebase binary download URL not found"
+
+              print(
+                  "binaryDownloadUri was not found"
               )
 
-          with open("firebase-download-url.txt", "w") as f:
+              print(
+                  "Available release fields:",
+                  list(latest.keys())
+              )
+
+              sys.exit(1)
+
+
+          with open(
+              "firebase-download-url.txt",
+              "w"
+          ) as f:
+
               f.write(download_url)
 
-          print("Firebase IPA download URL found")
+
+          print(
+              "Firebase IPA download URL found"
+          )
+
           PY
 
 
-      # ============================================================
+      # ==========================================================
       # DOWNLOAD IPA
-      # ============================================================
+      # ==========================================================
 
       - name: Download latest iOS IPA
         run: |
 
+          set -e
+
           DOWNLOAD_URL=$(cat firebase-download-url.txt)
+
+          echo "Downloading latest iOS IPA..."
 
           curl -fL \
             "${DOWNLOAD_URL}" \
             -o firebase-ios-app.ipa
 
-          test -s firebase-ios-app.ipa
+
+          if [ ! -s firebase-ios-app.ipa ]; then
+
+            echo "IPA download failed"
+
+            exit 1
+
+          fi
+
 
           echo "IPA downloaded successfully"
 
           ls -lh firebase-ios-app.ipa
 
 
-      # ============================================================
+      # ==========================================================
+      # VERIFY IPA
+      # ==========================================================
+
+      - name: Verify IPA
+        run: |
+
+          echo "IPA information:"
+
+          file firebase-ios-app.ipa
+
+          echo ""
+          echo "IPA contents:"
+
+          unzip -l firebase-ios-app.ipa \
+            | head -40
+
+
+      # ==========================================================
       # PCLOUDY AUTHENTICATION
-      # ============================================================
+      # ==========================================================
 
       - name: Authenticate with pCloudy
         env:
+
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
+
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
 
         run: |
+
+          set -e
 
           curl -fLsS \
             -u "${PCLOUDY_EMAIL}:${PCLOUDY_ACCESS_KEY}" \
             "https://device.pcloudy.com/api/access" \
             > pcloudy-auth.json
 
+
           python3 - <<'PY'
+
           import json
+          import sys
+
 
           with open("pcloudy-auth.json") as f:
               data = json.load(f)
 
-          print("pCloudy response received")
-          print("Response keys:", list(data.keys()))
+
+          print(
+              "pCloudy response keys:",
+              list(data.keys())
+          )
+
 
           def find_token(obj):
 
@@ -169,10 +282,12 @@ jobs:
                           if value:
                               return str(value)
 
+
                       result = find_token(value)
 
                       if result:
                           return result
+
 
               elif isinstance(obj, list):
 
@@ -183,30 +298,51 @@ jobs:
                       if result:
                           return result
 
+
               return None
+
 
           token = find_token(data)
 
+
           if not token:
-              raise SystemExit(
+
+              print(
                   "pCloudy authentication token was not found"
               )
 
-          with open("pcloudy-token.txt", "w") as f:
+              sys.exit(1)
+
+
+          with open(
+              "pcloudy-token.txt",
+              "w"
+          ) as f:
+
               f.write(token)
 
-          print("pCloudy authentication successful")
+
+          print(
+              "pCloudy authentication successful"
+          )
+
           PY
 
 
-      # ============================================================
+      # ==========================================================
       # UPLOAD IPA TO PCLOUDY
-      # ============================================================
+      # ==========================================================
 
       - name: Upload IPA to pCloudy
         run: |
 
+          set -e
+
           TOKEN=$(cat pcloudy-token.txt)
+
+
+          echo "Uploading IPA to pCloudy..."
+
 
           curl -fLsS \
             -X POST \
@@ -215,60 +351,173 @@ jobs:
             "https://device.pcloudy.com/api/upload_file" \
             > pcloudy-upload.json
 
-          echo "pCloudy upload completed"
 
-          cat pcloudy-upload.json
+          echo "pCloudy upload response received"
 
 
-      # ============================================================
-      # READ SELECTED DEVICES
-      # ============================================================
+          python3 - <<'PY'
+
+          import json
+          import sys
+
+
+          with open("pcloudy-upload.json") as f:
+              data = json.load(f)
+
+
+          print(
+              "pCloudy upload response keys:",
+              list(data.keys())
+              if isinstance(data, dict)
+              else type(data)
+          )
+
+
+          def find_application_name(obj):
+
+              if isinstance(obj, dict):
+
+                  for key, value in obj.items():
+
+                      key_lower = key.lower()
+
+                      if key_lower in (
+                          "applicationname",
+                          "application_name",
+                          "filename",
+                          "file_name"
+                      ):
+
+                          if value:
+
+                              return str(value)
+
+
+                      result = find_application_name(value)
+
+                      if result:
+
+                          return result
+
+
+              elif isinstance(obj, list):
+
+                  for value in obj:
+
+                      result = find_application_name(value)
+
+                      if result:
+
+                          return result
+
+
+              return None
+
+
+          application_name = find_application_name(data)
+
+
+          if not application_name:
+
+              print(
+                  "Application name was not found in upload response"
+              )
+
+              print(
+                  "Upload response:",
+                  data
+              )
+
+              sys.exit(1)
+
+
+          with open(
+              "pcloudy-application-name.txt",
+              "w"
+          ) as f:
+
+              f.write(application_name)
+
+
+          print(
+              "pCloudy application uploaded successfully"
+          )
+
+          PY
+
+
+      # ==========================================================
+      # READ DEVICES.JSON
+      # ==========================================================
 
       - name: Read selected devices
         run: |
 
-          python3 - <<'PY' > selected-devices.txt
-          import json
+          set -e
 
-          path = "Python/iOS-Appium/devices.json"
+
+          python3 - <<'PY' > selected-devices.txt
+
+          import json
+          import sys
+
+
+          path = (
+              "Python/iOS-Appium/devices.json"
+          )
+
 
           with open(path) as f:
               data = json.load(f)
 
+
           devices = data.get("devices", [])
 
+
           if not devices:
-              raise SystemExit(
+
+              print(
                   "No devices found in devices.json"
               )
 
+              sys.exit(1)
+
+
           for device in devices:
 
-              name = device.get("DeviceFullName")
+              device_name = device.get(
+                  "DeviceFullName"
+              )
 
-              if not name:
-                  raise SystemExit(
-                      "DeviceFullName is missing"
+
+              if not device_name:
+
+                  print(
+                      "DeviceFullName missing"
                   )
 
-              print(name)
+                  sys.exit(1)
 
-          print(
-              f"Selected devices: {len(devices)}",
-              file=__import__("sys").stderr
-          )
+
+              print(device_name)
+
           PY
+
+
+          echo "Selected devices:"
 
           cat selected-devices.txt
 
 
-      # ============================================================
-      # RUN APPIUM TESTS SEQUENTIALLY
-      # ============================================================
+      # ==========================================================
+      # RUN APPIUM SEQUENTIALLY
+      # ==========================================================
 
-      - name: Run Appium tests
+      - name: Run iOS Appium automation
         env:
+
           PCLOUDY_EMAIL: ${{ secrets.PCLOUDY_EMAIL }}
+
           PCLOUDY_ACCESS_KEY: ${{ secrets.PCLOUDY_ACCESS_KEY }}
 
           PCLOUDY_APPLICATION_NAME: firebase-ios-app.ipa
@@ -279,37 +528,60 @@ jobs:
 
           set -e
 
+
+          DEVICE_NUMBER=0
+
+
           while IFS= read -r DEVICE_NAME
           do
 
+            DEVICE_NUMBER=$((DEVICE_NUMBER + 1))
+
+
             echo ""
             echo "=========================================="
-            echo "Running Appium test"
+            echo "iOS Appium Test"
+            echo "Device #${DEVICE_NUMBER}"
             echo "Device: ${DEVICE_NAME}"
             echo "=========================================="
 
+
             export PCLOUDY_DEVICE="${DEVICE_NAME}"
+
 
             pytest \
               Python/iOS-Appium/test_ios_lifecycle.py \
               -v \
-              --html="ios-result.html" \
+              --html="ios-result-${DEVICE_NUMBER}.html" \
               --self-contained-html
+
+
+            echo ""
+            echo "Device #${DEVICE_NUMBER} completed"
+
 
           done < selected-devices.txt
 
 
-      # ============================================================
+      # ==========================================================
       # UPLOAD TEST RESULTS
-      # ============================================================
+      # ==========================================================
 
-      - name: Upload Appium results
+      - name: Upload Appium test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
+
           name: ios-appium-results
+
           path: |
-            ios-result.html
+
+            ios-result-*.html
+
             firebase-releases.json
+
             firebase-ios-app.ipa
+
             pcloudy-upload.json
+
+          if-no-files-found: warn
