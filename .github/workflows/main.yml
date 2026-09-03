@@ -43,6 +43,7 @@ jobs:
       # ==================================================
 
       - name: Install Python dependencies
+
         shell: bash
 
         run: |
@@ -129,18 +130,14 @@ jobs:
           echo "=========================================="
 
           PROJECT_NUMBER="$(printf '%s' "$FIREBASE_PROJECT_NUMBER" | tr -d '[:space:]')"
-
           APP_ID="$(printf '%s' "$FIREBASE_APP_ID" | tr -d '[:space:]')"
-
           TOKEN="$(printf '%s' "$ACCESS_TOKEN" | tr -d '[:space:]')"
 
-
-          # ------------------------------------------
-          # Validate Project Number
-          # ------------------------------------------
+          echo "Project Number: $PROJECT_NUMBER"
+          echo "Firebase App ID: $APP_ID"
 
           if [ -z "$PROJECT_NUMBER" ]; then
-            echo "ERROR: FIREBASE_PROJECT_NUMBER secret is empty"
+            echo "ERROR: FIREBASE_PROJECT_NUMBER is empty"
             exit 1
           fi
 
@@ -149,13 +146,8 @@ jobs:
             exit 1
           fi
 
-
-          # ------------------------------------------
-          # Validate Firebase App ID
-          # ------------------------------------------
-
           if [ -z "$APP_ID" ]; then
-            echo "ERROR: FIREBASE_APP_ID secret is empty"
+            echo "ERROR: FIREBASE_APP_ID is empty"
             exit 1
           fi
 
@@ -164,11 +156,6 @@ jobs:
             exit 1
           fi
 
-
-          # ------------------------------------------
-          # Validate Access Token
-          # ------------------------------------------
-
           if [ -z "$TOKEN" ]; then
             echo "ERROR: Firebase access token is empty"
             exit 1
@@ -176,186 +163,136 @@ jobs:
 
           echo "::add-mask::$TOKEN"
 
-
-          echo ""
-          echo "Project Number:"
-          echo "$PROJECT_NUMBER"
-
-          echo ""
-          echo "Firebase App ID:"
-          echo "$APP_ID"
-
-
-          # ------------------------------------------
-          # Firebase API URL
-          # ------------------------------------------
-
           API_URL="https://firebaseappdistribution.googleapis.com/v1/projects/${PROJECT_NUMBER}/apps/${APP_ID}/releases"
-
 
           echo ""
           echo "API URL:"
           echo "$API_URL"
 
-
           echo ""
           echo "Calling Firebase API..."
           echo "------------------------------------------"
 
+          rm -f firebase-debug-response.json
 
-          HTTP_CODE="$(
-            curl \
-              --silent \
-              --show-error \
-              --get \
-              --url "$API_URL" \
-              --header "Authorization: Bearer ${TOKEN}" \
-              --header "Accept: application/json" \
-              --data-urlencode "pageSize=1" \
-              --data-urlencode "orderBy=createTime desc" \
-              --output firebase-debug-response.json \
-              --write-out "%{http_code}"
-          )"
+          curl \
+            --silent \
+            --show-error \
+            --get \
+            --url "$API_URL" \
+            --header "Authorization: Bearer ${TOKEN}" \
+            --header "Accept: application/json" \
+            --data-urlencode "pageSize=1" \
+            --data-urlencode "orderBy=createTime desc" \
+            --output firebase-debug-response.json \
+            --write-out "HTTP_STATUS=%{http_code}\n" \
+            > firebase-http-status.txt
 
+          HTTP_CODE="$(cat firebase-http-status.txt | sed 's/HTTP_STATUS=//')"
 
           echo ""
           echo "HTTP Status: $HTTP_CODE"
 
           echo "------------------------------------------"
 
-
           echo ""
           echo "Firebase response:"
+          echo "------------------------------------------"
 
+          if [ -f firebase-debug-response.json ]; then
+            cat firebase-debug-response.json
+          else
+            echo "ERROR: Firebase response file was not created"
+            exit 1
+          fi
 
-          # ------------------------------------------
-          # Validate JSON
-          # ------------------------------------------
+          echo ""
+          echo "------------------------------------------"
 
-          if jq empty firebase-debug-response.json >/dev/null 2>&1; then
+          if [ "$HTTP_CODE" = "200" ]; then
 
-            if [ "$HTTP_CODE" = "200" ]; then
+            echo ""
+            echo "Firebase API returned HTTP 200"
 
-              echo ""
-              echo "SUCCESS: Firebase API returned 200"
-
-              echo ""
-              echo "Latest release details:"
-
-              jq '{
-                releases: [
-                  .releases[] |
-                  {
-                    name,
-                    displayVersion,
-                    buildVersion,
-                    createTime
-                  }
-                ]
-              }' firebase-debug-response.json
-
-
-              # ------------------------------------------
-              # Extract release information
-              # ------------------------------------------
-
-              DOWNLOAD_URL="$(
-                jq -r '.releases[0].binaryDownloadUri // empty' \
-                firebase-debug-response.json
-              )"
-
-              RELEASE_NAME="$(
-                jq -r '.releases[0].name // empty' \
-                firebase-debug-response.json
-              )"
-
-              DISPLAY_VERSION="$(
-                jq -r '.releases[0].displayVersion // empty' \
-                firebase-debug-response.json
-              )"
-
-              BUILD_VERSION="$(
-                jq -r '.releases[0].buildVersion // empty' \
-                firebase-debug-response.json
-              )"
-
-              CREATE_TIME="$(
-                jq -r '.releases[0].createTime // empty' \
-                firebase-debug-response.json
-              )
-
-
-              # ------------------------------------------
-              # Validate download URL
-              # ------------------------------------------
-
-              if [ -z "$DOWNLOAD_URL" ]; then
-
-                echo ""
-                echo "ERROR: Firebase returned 200 but no IPA download URL was found"
-
-                cat firebase-debug-response.json
-
-                exit 1
-
-              fi
-
-
-              echo ""
-              echo "=========================================="
-              echo "Latest Firebase release found"
-              echo "=========================================="
-
-              echo "Release : $RELEASE_NAME"
-              echo "Version : $DISPLAY_VERSION"
-              echo "Build   : $BUILD_VERSION"
-              echo "Created : $CREATE_TIME"
-
-
-              echo "::add-mask::$DOWNLOAD_URL"
-
-              echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
-
-
-            else
-
-              echo ""
-              echo "ERROR RESPONSE:"
-
-              jq . firebase-debug-response.json
-
-
+            if ! jq empty firebase-debug-response.json >/dev/null 2>&1; then
+              echo "ERROR: Firebase returned invalid JSON"
+              exit 1
             fi
+
+            echo ""
+            echo "Latest release details:"
+
+            jq '{
+              releases: [
+                .releases[] |
+                {
+                  name,
+                  displayVersion,
+                  buildVersion,
+                  createTime
+                }
+              ]
+            }' firebase-debug-response.json
+
+            DOWNLOAD_URL="$(
+              jq -r '.releases[0].binaryDownloadUri // empty' \
+              firebase-debug-response.json
+            )"
+
+            RELEASE_NAME="$(
+              jq -r '.releases[0].name // empty' \
+              firebase-debug-response.json
+            )"
+
+            DISPLAY_VERSION="$(
+              jq -r '.releases[0].displayVersion // empty' \
+              firebase-debug-response.json
+            )"
+
+            BUILD_VERSION="$(
+              jq -r '.releases[0].buildVersion // empty' \
+              firebase-debug-response.json
+            )"
+
+            if [ -z "$DOWNLOAD_URL" ]; then
+              echo ""
+              echo "ERROR: No IPA download URL found"
+              exit 1
+            fi
+
+            echo ""
+            echo "=========================================="
+            echo "Firebase release found"
+            echo "=========================================="
+
+            echo "Release : $RELEASE_NAME"
+            echo "Version : $DISPLAY_VERSION"
+            echo "Build   : $BUILD_VERSION"
+
+            echo "::add-mask::$DOWNLOAD_URL"
+
+            echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+
+            echo ""
+            echo "Firebase API request PASSED"
 
           else
 
             echo ""
-            echo "Firebase response is not valid JSON:"
-
-            cat firebase-debug-response.json
-
-          fi
-
-
-          echo ""
-          echo "=========================================="
-
-
-          if [ "$HTTP_CODE" != "200" ]; then
-
+            echo "=========================================="
             echo "Firebase API request FAILED"
+            echo "=========================================="
 
             echo "HTTP Status: $HTTP_CODE"
 
-            echo "=========================================="
+            echo ""
+            echo "The Firebase API error above is the important diagnostic."
 
             exit 1
 
           fi
 
-
-          echo "Firebase API request PASSED"
-
+          echo ""
           echo "=========================================="
 
 
@@ -392,15 +329,10 @@ jobs:
             "$DOWNLOAD_URL" \
             --output firebase-ios-app.ipa
 
-
           if [ ! -s firebase-ios-app.ipa ]; then
-
             echo "ERROR: IPA download failed"
-
             exit 1
-
           fi
-
 
           echo ""
           echo "Firebase IPA downloaded successfully"
@@ -428,11 +360,8 @@ jobs:
           IPA_SIZE="$(stat -c%s firebase-ios-app.ipa)"
 
           if [ "$IPA_SIZE" -le 0 ]; then
-
             echo "ERROR: IPA is empty"
-
             exit 1
-
           fi
 
           echo ""
@@ -463,21 +392,14 @@ jobs:
           echo "=========================================="
 
           if [ -z "$PCLOUDY_EMAIL" ]; then
-
             echo "ERROR: PCLOUDY_EMAIL is empty"
-
             exit 1
-
           fi
 
           if [ -z "$PCLOUDY_ACCESS_KEY" ]; then
-
             echo "ERROR: PCLOUDY_ACCESS_KEY is empty"
-
             exit 1
-
           fi
-
 
           RESPONSE="$(
             curl \
@@ -488,31 +410,22 @@ jobs:
               "https://device.pcloudy.com/api/access"
           )"
 
-
           echo "$RESPONSE" > pcloudy-auth.json
-
 
           TOKEN="$(
             echo "$RESPONSE" |
             jq -r '.result.token // empty'
           )"
 
-
           if [ -z "$TOKEN" ]; then
-
             echo "ERROR: Could not extract pCloudy token"
-
             cat pcloudy-auth.json
-
             exit 1
-
           fi
-
 
           echo "::add-mask::$TOKEN"
 
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
-
 
           echo ""
           echo "pCloudy authentication successful"
@@ -539,13 +452,9 @@ jobs:
           echo "=========================================="
 
           if [ -z "$PCLOUDY_TOKEN" ]; then
-
             echo "ERROR: pCloudy token is empty"
-
             exit 1
-
           fi
-
 
           RESPONSE="$(
             curl \
@@ -558,21 +467,17 @@ jobs:
               "https://device.pcloudy.com/api/devices"
           )"
 
-
           printf '%s\n' "$RESPONSE" > pcloudy-devices.json
-
 
           echo ""
           echo "=========================================="
           echo "Available iOS devices"
           echo "=========================================="
 
-
           jq -r '
             .result.models[] |
             "\(.display_name) | iOS \(.version) | available=\(.available) | full_name=\(.full_name)"
           ' pcloudy-devices.json
-
 
           echo ""
           echo "Device list retrieved successfully"
@@ -591,15 +496,12 @@ jobs:
 
           TARGET_DEVICE="Apple_iPhone12ProMax_Ios_16.3.1_22ba7"
 
-
           echo "=========================================="
           echo "Checking requested device"
           echo "=========================================="
 
-
           echo "Requested Device:"
           echo "$TARGET_DEVICE"
-
 
           FOUND="$(
             jq -r --arg DEVICE "$TARGET_DEVICE" '
@@ -612,16 +514,13 @@ jobs:
             ' pcloudy-devices.json
           )"
 
-
           if [ -z "$FOUND" ]; then
 
             echo ""
             echo "ERROR: iPhone 12 Pro Max is not currently available"
 
-
             echo ""
             echo "Available devices:"
-
 
             jq -r '
               .result.models[] |
@@ -629,17 +528,14 @@ jobs:
               "\(.display_name) | iOS \(.version) | \(.full_name)"
             ' pcloudy-devices.json
 
-
             exit 1
 
           fi
-
 
           echo ""
           echo "=========================================="
           echo "SUCCESS"
           echo "=========================================="
-
 
           echo "iPhone 12 Pro Max is available"
 
@@ -666,15 +562,10 @@ jobs:
           echo "Uploading Firebase IPA to pCloudy"
           echo "=========================================="
 
-
           if [ ! -s firebase-ios-app.ipa ]; then
-
             echo "ERROR: firebase-ios-app.ipa does not exist"
-
             exit 1
-
           fi
-
 
           HTTP_CODE="$(
             curl \
@@ -690,10 +581,8 @@ jobs:
               "https://device.pcloudy.com/api/upload_file"
           )"
 
-
           echo ""
           echo "pCloudy upload HTTP status: ${HTTP_CODE}"
-
 
           if [ "$HTTP_CODE" != "200" ]; then
 
@@ -705,7 +594,7 @@ jobs:
 
           fi
 
-
+          echo ""
           echo "IPA uploaded to pCloudy successfully"
 
 
@@ -729,7 +618,6 @@ jobs:
 
           IOS_BUNDLE_ID: com.pcloudy.TestmunkDemo
 
-
         run: |
           set -euo pipefail
 
@@ -737,24 +625,18 @@ jobs:
           echo "Starting iOS Appium lifecycle test"
           echo "=========================================="
 
-
           echo "Device : $PCLOUDY_DEVICE"
-
           echo "Bundle : $IOS_BUNDLE_ID"
-
           echo "App    : $PCLOUDY_APPLICATION_NAME"
-
 
           echo ""
           echo "=========================================="
-
 
           pytest \
             Python/iOS-Appium/test_ios_lifecycle.py \
             -v \
             --tb=short \
             --junitxml=ios-appium-results.xml
-
 
           echo ""
           echo "=========================================="
@@ -781,7 +663,7 @@ jobs:
           path: |
             ios-appium-results.xml
             firebase-debug-response.json
-            firebase-ios-app.ipa
+            firebase-http-status.txt
             pcloudy-auth.json
             pcloudy-devices.json
             pcloudy-upload.json
